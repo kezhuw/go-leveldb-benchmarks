@@ -1,0 +1,6 @@
+[submodule "github.com/kezhuw/leveldb"]
+	path = vendor/github.com/kezhuw/leveldb
+	url = https://github.com/kezhuw/leveldb.git
+[submodule "github.com/syndtr/goleveldb"]
+	path = vendor/github.com/syndtr/goleveldb
+	url = https://github.com/syndtr/goleveldb.git
