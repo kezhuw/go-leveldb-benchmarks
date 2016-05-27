@@ -6,15 +6,11 @@ Benchmark LevelDB implementations in Go using same logic.
 
 In labtop: MacBook Pro (Retina, 13-inch, Mid 2014), 3 GHz Intel Core i7, 16 GB 1600 MHz DDR3.
 
-There are about about 10 GB free memory and no swap used in testing.
+There are about 10 GB free memory and no swap used in testing.
 
-Options: No sync, No bloom filter, Snappy compression.
-
-The result may not be accurate, and may contain errors. If in doubt, test it youself. Read the fucking
-code if necessary.
-
-There may be suttle differences in read/write options between implementations.
-Currently, kezhuw/leveldb doest not write info log about LevelDB internal progress.
+Default options: No sync, No bloom filter, Snappy compression. The
+result may not be accurate, and may contain errors. If in doubt,
+test it youself.
 
 ```shell
 # go test -driver cpp -bench .
