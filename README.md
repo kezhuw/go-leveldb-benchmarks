@@ -2,6 +2,13 @@
 
 Benchmark LevelDB implementations in Go using same logic.
 
+## Implementations
+Currently, we benchmark three implementations:
+
+* [google/leveldb](https://github.com/google/leveldb) Official C++ implementation.
+* [syndtr/goleveldb](https://github.com/syndtr/goleveldb) Go implementation.
+* [kezhuw/leveldb](https://github.com/kezhuw/leveldb) Go implementation.
+
 ## Benchmarks
 
 In labtop: MacBook Pro (Retina, 13-inch, Mid 2014), 3 GHz Intel Core i7, 16 GB 1600 MHz DDR3.
