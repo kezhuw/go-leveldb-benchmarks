@@ -61,21 +61,61 @@ func (b batch) Clear() {
 }
 
 type wrappedIterator struct {
-	iterator.Iterator
+	it  iterator.Iterator
+	run bool
+}
+
+func (it *wrappedIterator) First() bool {
+	it.run = true
+	return it.it.First()
+}
+
+func (it *wrappedIterator) Last() bool {
+	it.run = true
+	return it.it.Last()
+}
+
+func (it *wrappedIterator) Seek(key []byte) bool {
+	it.run = true
+	return it.it.Seek(key)
+}
+
+func (it *wrappedIterator) Next() bool {
+	it.run = true
+	return it.it.Next()
+}
+
+func (it *wrappedIterator) Prev() bool {
+	if it.run {
+		return it.it.Prev()
+	}
+	return it.Last()
+}
+
+func (it *wrappedIterator) Valid() bool {
+	return it.it.Valid()
+}
+
+func (it *wrappedIterator) Key() []byte {
+	return it.it.Key()
+}
+
+func (it *wrappedIterator) Value() []byte {
+	return it.it.Value()
 }
 
 func (it *wrappedIterator) Err() error {
-	return it.Error()
+	return it.it.Error()
 }
 
 func (it *wrappedIterator) Release() error {
-	it.Iterator.Release()
+	it.it.Release()
 	return nil
 }
 
 func (db *DB) All(opts *driver.ReadOptions) driver.Iterator {
 	it := db.db.NewIterator(nil, convertReadOptions(opts))
-	return &wrappedIterator{it}
+	return &wrappedIterator{it: it}
 }
 
 func (db *DB) Get(key []byte, opts *driver.ReadOptions) ([]byte, error) {
