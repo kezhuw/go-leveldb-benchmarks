@@ -1,6 +1,6 @@
 # LevelDB Benchmarks in Go
 
-Benchmark LevelDB implementations in Go using same logic.
+Benchmark LevelDB implementations in Go using same benchmarking code.
 
 ## Implementations
 Currently, we benchmark three implementations:
@@ -9,14 +9,11 @@ Currently, we benchmark three implementations:
 * [syndtr/goleveldb](https://github.com/syndtr/goleveldb) Go implementation.
 * [kezhuw/leveldb](https://github.com/kezhuw/leveldb) Go implementation.
 
-## Benchmarks
-
-In labtop: MacBook Pro (Retina, 13-inch, Mid 2014), 3 GHz Intel Core i7, 16 GB 1600 MHz DDR3.
-
-There are about 10 GB free memory and no swap used in testing.
+## Benchmark Results
+In labtop: MacBook Pro (Retina, 13-inch, Mid 2014), 3 GHz Intel Core i7, 16 GB 1600 MHz DDR3. There are about 10 GB free memory and no swap used in testing.
 
 Default options: No sync, No bloom filter, Snappy compression. The
-result may not be accurate, and may contain errors. If in doubt,
+results may not be accurate, and may contain errors. If in doubt,
 test it youself.
 
 ```shell
