@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/kezhuw/go-leveldb-benchmarks/cpp"
+	_ "github.com/kezhuw/go-leveldb-benchmarks/cgo"
 	"github.com/kezhuw/go-leveldb-benchmarks/driver"
 	_ "github.com/kezhuw/go-leveldb-benchmarks/kezhuw"
 	_ "github.com/kezhuw/go-leveldb-benchmarks/syndtr"

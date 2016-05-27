@@ -1,4 +1,4 @@
-package cpp
+package cgo
 
 import (
 	"errors"
@@ -304,5 +304,5 @@ func (driverType) Open(dir string, dopts *driver.Options) (driver.DB, error) {
 }
 
 func init() {
-	driver.Register("cpp", driverType{})
+	driver.Register("cgo", driverType{})
 }

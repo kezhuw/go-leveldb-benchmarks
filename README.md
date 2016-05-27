@@ -13,8 +13,8 @@ result may not be accurate, and may contain errors. If in doubt,
 test it youself.
 
 ```shell
-# go test -driver cpp -bench .
-# https://github.com/google/leveldb  [cgo]
+# go test -driver cgo -bench .
+# https://github.com/google/leveldb
 BenchmarkOpen-4                     1000           1185245 ns/op
 BenchmarkSeekRandom-4            1000000             42137 ns/op
 BenchmarkReadHot-4                500000              5093 ns/op
