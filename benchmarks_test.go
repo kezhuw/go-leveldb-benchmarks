@@ -297,13 +297,13 @@ func openFullDB(b *testing.B) (driver.DB, func()) {
 	}()
 	db := openDB(dir, b)
 	ok = true
-	return db, func() { os.RemoveAll(dir); db.Close() }
+	return db, func() { db.Close(); os.RemoveAll(dir) }
 }
 
 func openEmptyDB(b *testing.B) (driver.DB, func()) {
 	defer b.ResetTimer()
 	db, dir := createDB(b)
-	return db, func() { os.RemoveAll(dir); db.Close() }
+	return db, func() { db.Close(); os.RemoveAll(dir) }
 }
 
 func BenchmarkOpen(b *testing.B) {
