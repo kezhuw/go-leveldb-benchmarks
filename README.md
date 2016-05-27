@@ -10,7 +10,7 @@ Currently, we benchmark three implementations:
 * [kezhuw/leveldb](https://github.com/kezhuw/leveldb) Go implementation.
 
 ## Benchmark Results
-In labtop: MacBook Pro (Retina, 13-inch, Mid 2014), 3 GHz Intel Core i7, 16 GB 1600 MHz DDR3. There are about 10 GB free memory and no swap used in testing.
+In labtop: MacBook Pro (Retina, 13-inch, Mid 2014), 3 GHz Intel Core i7, 16 GB 1600 MHz DDR3, 512 SSD. There are about 10 GB free memory, 70 GB free SSD, and no swap used in testing.
 
 Default options: No sync, No bloom filter, Snappy compression. The
 results may not be accurate, and may contain errors. If in doubt,
