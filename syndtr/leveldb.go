@@ -49,7 +49,12 @@ func convertReadOptions(dopts *driver.ReadOptions) *opt.ReadOptions {
 }
 
 func convertWriteOptions(dopts *driver.WriteOptions) *opt.WriteOptions {
-	return (*opt.WriteOptions)(dopts)
+	if dopts == nil || dopts.Sync == false {
+		return nil
+	}
+	return &opt.WriteOptions{
+		Sync: dopts.Sync,
+	}
 }
 
 type batch struct {
