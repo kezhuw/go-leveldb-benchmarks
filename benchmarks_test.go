@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -115,10 +116,10 @@ func newRandomEntryGenerator(n int) entryGenerator {
 	}
 }
 
-func newFullRandomEntryGenerator(n int) entryGenerator {
+func newFullRandomEntryGenerator(start, n int) entryGenerator {
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	return &pairedEntryGenerator{
-		keyGenerator:         newFullRandomKeyGenerator(n),
+		keyGenerator:         newFullRandomKeyGenerator(start, n),
 		randomValueGenerator: makeRandomValueGenerator(r, *compressionRatio, *valueSize),
 	}
 }
@@ -162,10 +163,10 @@ type fullRandomKeyGenerator struct {
 	b    bytes.Buffer
 }
 
-func newFullRandomKeyGenerator(n int) keyGenerator {
+func newFullRandomKeyGenerator(start, n int) keyGenerator {
 	keys := make([]int, n)
 	for i := 0; i < n; i++ {
-		keys[i] = i
+		keys[i] = start + i
 	}
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	for i := 0; i < n; i++ {
@@ -272,7 +273,7 @@ func newDB(b *testing.B) string {
 			os.RemoveAll(dir)
 		}
 	}()
-	doWrite(b, db, 1000, newFullRandomEntryGenerator(b.N))
+	doWrite(b, db, 1000, newFullRandomEntryGenerator(0, b.N))
 	db.Close()
 	db = nil
 	return dir
@@ -388,13 +389,47 @@ func BenchmarkReadSequential(b *testing.B) {
 func BenchmarkWriteRandom(b *testing.B) {
 	db, cleanup := openEmptyDB(b)
 	defer cleanup()
-	doWrite(b, db, maxInt(*batchCount, 1), newFullRandomEntryGenerator(b.N))
+	g := newFullRandomEntryGenerator(0, b.N)
+	b.ResetTimer()
+	doWrite(b, db, maxInt(*batchCount, 1), g)
 }
 
 func BenchmarkWriteSequential(b *testing.B) {
 	db, cleanup := openEmptyDB(b)
 	defer cleanup()
-	doWrite(b, db, maxInt(*batchCount, 1), newSequentialEntryGenerator(b.N))
+	g := newSequentialEntryGenerator(b.N)
+	b.ResetTimer()
+	doWrite(b, db, maxInt(*batchCount, 1), g)
+}
+
+func BenchmarkConcurrentWriteRandom(b *testing.B) {
+	db, cleanup := openEmptyDB(b)
+	defer cleanup()
+	k := runtime.GOMAXPROCS(-1)
+	if k > b.N {
+		k = b.N
+	}
+	var gens []entryGenerator
+	start, step := 0, b.N/k
+	for i := 0; i < k; i++ {
+		gens = append(gens, newFullRandomEntryGenerator(start, step))
+		start += step
+	}
+	runtime.GC()
+	b.ResetTimer()
+	defer func(n int) {
+		b.N = n
+	}(b.N)
+	b.N = step
+	var wg sync.WaitGroup
+	wg.Add(len(gens))
+	for _, g := range gens {
+		go func(g entryGenerator) {
+			defer wg.Done()
+			doWrite(b, db, maxInt(*batchCount, 1), g)
+		}(g)
+	}
+	wg.Wait()
 }
 
 func BenchmarkDeleteRandom(b *testing.B) {
