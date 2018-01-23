@@ -21,7 +21,7 @@ import (
 
 var driverName = flag.String("driver", "kezhuw", "Name of LevelDB implementation")
 
-var openDBEntries = flag.Int("open_entries", 1000000, "Number of entries in db for opening")
+var openDBSize = flag.Int("open_db_size", 128*1024*1024, "Number of entries in db for opening")
 var writeSync = flag.Bool("write_sync", false, "sync writing")
 var cacheSize = flag.Int("cache_size", 0, "Capacity for block cache")
 var valueSize = flag.Int("value_size", 100, "Size of each value")
@@ -309,11 +309,11 @@ func openEmptyDB(b *testing.B) (driver.DB, func()) {
 }
 
 func BenchmarkOpen(b *testing.B) {
+	defer func(N int) {
+		b.N = N
+	}(b.N)
 	n := b.N
-	b.N = *openDBEntries
-	defer func() {
-		b.N = n
-	}()
+	b.N = *openDBSize / *valueSize
 	dir := newDB(b)
 	b.N = n
 	defer os.RemoveAll(dir)
