@@ -34,6 +34,8 @@ var openFiles = flag.Int("open_files", 0, "Max number of open files")
 var compression = flag.String("compression", "default", "")
 var compressionRatio = flag.Float64("compression_ratio", 0.5, "")
 
+var maxConcurrency = flag.Int("max_concurrency", 2048, "Max concurrency in concurrent benchmark")
+
 var openOptions driver.Options
 var createOptions driver.Options
 
@@ -402,34 +404,38 @@ func BenchmarkWriteSequential(b *testing.B) {
 	doWrite(b, db, maxInt(*batchCount, 1), g)
 }
 
+func buildConcurrentWrite(parallelism int) func(*testing.B) {
+	return func(b *testing.B) {
+		db, cleanup := openEmptyDB(b)
+		defer cleanup()
+		var gens []entryGenerator
+		for i := 0; i < parallelism; i++ {
+			gens = append(gens, newRandomEntryGenerator(b.N))
+		}
+		runtime.GC()
+		b.ResetTimer()
+		defer func(n int) {
+			b.N = n
+		}(b.N)
+		b.N = (b.N + parallelism) / parallelism
+		var wg sync.WaitGroup
+		wg.Add(len(gens))
+		for _, g := range gens {
+			go func(g entryGenerator) {
+				defer wg.Done()
+				doWrite(b, db, maxInt(*batchCount, 1), g)
+			}(g)
+		}
+		wg.Wait()
+	}
+}
+
 func BenchmarkConcurrentWriteRandom(b *testing.B) {
-	db, cleanup := openEmptyDB(b)
-	defer cleanup()
-	k := runtime.GOMAXPROCS(-1)
-	if k > b.N {
-		k = b.N
+	for i, n := 2, *maxConcurrency; i <= n; i *= 2 {
+		name := fmt.Sprintf("parallelism-%d", i)
+		runtime.GC()
+		b.Run(name, buildConcurrentWrite(i))
 	}
-	var gens []entryGenerator
-	start, step := 0, b.N/k
-	for i := 0; i < k; i++ {
-		gens = append(gens, newFullRandomEntryGenerator(start, step))
-		start += step
-	}
-	runtime.GC()
-	b.ResetTimer()
-	defer func(n int) {
-		b.N = n
-	}(b.N)
-	b.N = step
-	var wg sync.WaitGroup
-	wg.Add(len(gens))
-	for _, g := range gens {
-		go func(g entryGenerator) {
-			defer wg.Done()
-			doWrite(b, db, maxInt(*batchCount, 1), g)
-		}(g)
-	}
-	wg.Wait()
 }
 
 func BenchmarkDeleteRandom(b *testing.B) {
