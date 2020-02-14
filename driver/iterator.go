@@ -38,8 +38,8 @@ type Iterator interface {
 	// clear this error.
 	Err() error
 
-	// Release releases any resources hold by this iterator, and returns
+	// Close releases any resources hold by this iterator, and returns
 	// any error it encounters so far. The behaviour is undefined if you
 	// call any methods after this iterator has been closed.
-	Release() error
+	Close() error
 }

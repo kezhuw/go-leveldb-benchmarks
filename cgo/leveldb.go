@@ -110,7 +110,7 @@ func (it *iterator) Value() []byte {
 	return C.GoBytes(unsafe.Pointer(p), C.int(n))
 }
 
-func (it *iterator) Release() error {
+func (it *iterator) Close() error {
 	err := it.Err()
 	C.leveldb_iter_destroy(it.it)
 	return err

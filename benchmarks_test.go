@@ -330,7 +330,7 @@ func BenchmarkSeekRandom(b *testing.B) {
 	defer cleanup()
 	g := newRandomKeyGenerator(b.N)
 	it := db.All(nil)
-	defer it.Release()
+	defer it.Close()
 	for i := 0; i < b.N; i++ {
 		if !it.Seek(g.Key(i)) {
 			b.Fatalf("db seek not found: %s\n", it.Err())
@@ -364,7 +364,7 @@ func BenchmarkReadReverse(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
 	it := db.All(nil)
-	defer it.Release()
+	defer it.Close()
 	for it.Prev() {
 		it.Key()
 		it.Value()
@@ -378,7 +378,7 @@ func BenchmarkReadSequential(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
 	it := db.All(nil)
-	defer it.Release()
+	defer it.Close()
 	for it.Next() {
 		it.Key()
 		it.Value()

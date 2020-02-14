@@ -113,7 +113,7 @@ func (it *wrappedIterator) Err() error {
 	return it.it.Error()
 }
 
-func (it *wrappedIterator) Release() error {
+func (it *wrappedIterator) Close() error {
 	it.it.Release()
 	return nil
 }
