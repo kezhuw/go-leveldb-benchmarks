@@ -5,10 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"os"
-	"reflect"
 	"runtime"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -41,6 +42,23 @@ var createOptions driver.Options
 
 var readOptions driver.ReadOptions
 var writeOptions driver.WriteOptions
+
+const hitKeyFormat = "%016d+"
+const missingKeyFormat = "%016d-"
+
+var keyLen int
+
+var templateDBDir string
+
+func init() {
+	var b bytes.Buffer
+	keyLen, _ = fmt.Fprintf(&b, hitKeyFormat, math.MaxInt32)
+	b.Reset()
+	missingKeyLen, _ := fmt.Fprintf(&b, missingKeyFormat, math.MaxInt32)
+	if keyLen != missingKeyLen {
+		panic("len(key) != len(missingKey)")
+	}
+}
 
 func initOptions() {
 	openOptions.MaxOpenFiles = *openFiles
@@ -101,13 +119,73 @@ func makeRandomValueGenerator(r *rand.Rand, ratio float64, valueSize int) random
 }
 
 type entryGenerator interface {
-	Key(i int) []byte
+	keyGenerator
 	Value(i int) []byte
 }
 
 type pairedEntryGenerator struct {
 	keyGenerator
 	randomValueGenerator
+}
+
+type startAtEntryGenerator struct {
+	entryGenerator
+	start int
+}
+
+var _ entryGenerator = (*startAtEntryGenerator)(nil)
+
+func (g *startAtEntryGenerator) NKey() int {
+	return g.entryGenerator.NKey() - g.start
+}
+
+func (g *startAtEntryGenerator) Key(i int) []byte {
+	return g.entryGenerator.Key(g.start + i)
+}
+
+func newStartAtEntryGenerator(start int, g entryGenerator) entryGenerator {
+	return &startAtEntryGenerator{start: start, entryGenerator: g}
+}
+
+func newSequentialKeys(n int, start int, keyFormat string) [][]byte {
+	keys := make([][]byte, n)
+	buffer := make([]byte, n*keyLen)
+	for i := 0; i < n; i++ {
+		begin, end := i*keyLen, (i+1)*keyLen
+		key := buffer[begin:begin:end]
+		n, _ := fmt.Fprintf(bytes.NewBuffer(key), keyFormat, start+i)
+		if n != keyLen {
+			panic("n != keyLen")
+		}
+		keys[i] = buffer[begin:end:end]
+	}
+	return keys
+}
+
+func newRandomKeys(n int, format string) [][]byte {
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	keys := make([][]byte, n)
+	buffer := make([]byte, n*keyLen)
+	for i := 0; i < n; i++ {
+		begin, end := i*keyLen, (i+1)*keyLen
+		key := buffer[begin:begin:end]
+		n, _ := fmt.Fprintf(bytes.NewBuffer(key), format, r.Intn(n))
+		if n != keyLen {
+			panic("n != keyLen")
+		}
+		keys[i] = buffer[begin:end:end]
+	}
+	return keys
+}
+
+func newFullRandomKeys(n int, start int, format string) [][]byte {
+	keys := newSequentialKeys(n, start, format)
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	for i := 0; i < n; i++ {
+		j := r.Intn(n)
+		keys[i], keys[j] = keys[j], keys[i]
+	}
+	return keys
 }
 
 func newRandomEntryGenerator(n int) entryGenerator {
@@ -135,69 +213,72 @@ func newSequentialEntryGenerator(n int) entryGenerator {
 }
 
 type keyGenerator interface {
+	NKey() int
 	Key(i int) []byte
 }
 
-type randomKeyGenerator struct {
-	n int
-	b bytes.Buffer
-	f string
-	r *rand.Rand
+type reversedKeyGenerator struct {
+	keyGenerator
 }
 
-func (g *randomKeyGenerator) Key(i int) []byte {
-	i = g.r.Intn(g.n)
-	g.b.Reset()
-	fmt.Fprintf(&g.b, g.f, i)
-	return g.b.Bytes()
+var _ keyGenerator = (*reversedKeyGenerator)(nil)
+
+func (g *reversedKeyGenerator) Key(i int) []byte {
+	return g.keyGenerator.Key(g.NKey() - i - 1)
+}
+
+func newReversedKeyGenerator(g keyGenerator) keyGenerator {
+	return &reversedKeyGenerator{keyGenerator: g}
+}
+
+type roundKeyGenerator struct {
+	keyGenerator
+}
+
+var _ keyGenerator = (*roundKeyGenerator)(nil)
+
+func (g *roundKeyGenerator) Key(i int) []byte {
+	return g.keyGenerator.Key(i % g.NKey())
+}
+
+func newRoundKeyGenerator(g keyGenerator) keyGenerator {
+	return &roundKeyGenerator{keyGenerator: g}
+}
+
+type predefinedKeyGenerator struct {
+	keys [][]byte
+}
+
+func (g *predefinedKeyGenerator) NKey() int {
+	return len(g.keys)
+}
+
+func (g *predefinedKeyGenerator) Key(i int) []byte {
+	return g.keys[i]
 }
 
 func newRandomKeyGenerator(n int) keyGenerator {
-	return &randomKeyGenerator{n: n, f: "%016d", r: rand.New(rand.NewSource(time.Now().Unix()))}
+	return &predefinedKeyGenerator{keys: newRandomKeys(n, hitKeyFormat)}
 }
 
-func newMissingKeyGenerator(n int) keyGenerator {
-	return &randomKeyGenerator{n: n, f: "%016d.", r: rand.New(rand.NewSource(time.Now().Unix()))}
-}
-
-type fullRandomKeyGenerator struct {
-	keys []int
-	b    bytes.Buffer
+func newRandomMissingKeyGenerator(n int) keyGenerator {
+	return &predefinedKeyGenerator{keys: newRandomKeys(n, missingKeyFormat)}
 }
 
 func newFullRandomKeyGenerator(start, n int) keyGenerator {
-	keys := make([]int, n)
-	for i := 0; i < n; i++ {
-		keys[i] = start + i
-	}
-	r := rand.New(rand.NewSource(time.Now().Unix()))
-	for i := 0; i < n; i++ {
-		j := r.Intn(n)
-		keys[i], keys[j] = keys[j], keys[i]
-	}
-	return &fullRandomKeyGenerator{keys: keys}
+	return &predefinedKeyGenerator{keys: newFullRandomKeys(n, start, hitKeyFormat)}
 }
 
-func (g *fullRandomKeyGenerator) Key(i int) []byte {
-	i = i % len(g.keys)
-	i = g.keys[i]
-	g.b.Reset()
-	fmt.Fprintf(&g.b, "%016d", i)
-	return g.b.Bytes()
-}
-
-type sequentialKeyGenerator struct {
-	bytes.Buffer
-}
-
-func (g *sequentialKeyGenerator) Key(i int) []byte {
-	g.Reset()
-	fmt.Fprintf(g, "%016d", i)
-	return g.Bytes()
+func newSortedRandomKeyGenerator(n int) keyGenerator {
+	keys := newRandomKeys(n, hitKeyFormat)
+	sort.Slice(keys, func(i, j int) bool {
+		return bytes.Compare(keys[i], keys[j]) < 0
+	})
+	return &predefinedKeyGenerator{keys: keys}
 }
 
 func newSequentialKeyGenerator(n int) keyGenerator {
-	return &sequentialKeyGenerator{}
+	return &predefinedKeyGenerator{keys: newSequentialKeys(n, 0, hitKeyFormat)}
 }
 
 func maxInt(a int, b int) int {
@@ -209,48 +290,123 @@ func maxInt(a int, b int) int {
 
 func doRead(b *testing.B, db driver.DB, g keyGenerator, allowNotFound bool) {
 	for i := 0; i < b.N; i++ {
-		_, err := db.Get(g.Key(i), &readOptions)
+		key := g.Key(i)
+		_, err := db.Get(key, &readOptions)
 		switch {
 		case err == nil:
 		case allowNotFound && db.IsNotFound(err):
 		default:
-			b.Fatalf("db get error: %s\n", err)
+			b.Fatalf("db get key[%s] error: %s\n", key, err)
 		}
 	}
 }
 
-func doWrite(b *testing.B, db driver.DB, batchCount int, g entryGenerator) {
-	batch := db.Batch()
-	for i := 0; i < b.N; i += batchCount {
-		for j := 0; j < batchCount; j++ {
-			batch.Put(g.Key(i+j), g.Value(i+j))
-		}
-		err := db.Write(batch, &writeOptions)
-		if err != nil {
-			b.Fatalf("write db error: %s, type: %s\n", err, reflect.TypeOf(err))
-		}
-		batch.Clear()
+type DBWriter interface {
+	Put(key, value []byte)
+
+	Delete(key []byte)
+
+	Done()
+}
+
+type singularDBWriter struct {
+	db driver.DB
+}
+
+var _ DBWriter = (*singularDBWriter)(nil)
+
+func (w *singularDBWriter) Put(key, value []byte) {
+	err := w.db.Put(key, value, &writeOptions)
+	if err != nil {
+		panic(err)
 	}
+}
+
+func (w *singularDBWriter) Delete(key []byte) {
+	err := w.db.Delete(key, &writeOptions)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (w *singularDBWriter) Done() {
+}
+
+type batchDBWriter struct {
+	db    driver.DB
+	batch driver.Batch
+	max   int
+	count int
+}
+
+var _ DBWriter = (*batchDBWriter)(nil)
+
+func (w *batchDBWriter) writeBatch() error {
+	err := w.db.Write(w.batch, &writeOptions)
+	w.count = 0
+	w.batch.Clear()
+	return err
+}
+
+func (w *batchDBWriter) checkBatch(max int) {
+	if w.count >= max {
+		err := w.db.Write(w.batch, &writeOptions)
+		if err != nil {
+			panic(err)
+		}
+		w.count = 0
+		w.batch.Clear()
+	}
+}
+
+func (w *batchDBWriter) Put(key, value []byte) {
+	w.batch.Put(key, value)
+	w.count++
+	w.checkBatch(w.max)
+}
+
+func (w *batchDBWriter) Delete(key []byte) {
+	w.batch.Delete(key)
+	w.count++
+	w.checkBatch(w.max)
+}
+
+func (w *batchDBWriter) Done() {
+	w.checkBatch(1)
+}
+
+func newDBWriter(db driver.DB, batchCount int) DBWriter {
+	if batchCount <= 1 {
+		return &singularDBWriter{db: db}
+	}
+	return &batchDBWriter{
+		db:    db,
+		batch: db.Batch(),
+		max:   batchCount,
+		count: 0,
+	}
+}
+
+func doWrite(db driver.DB, n int, batchCount int, g entryGenerator) {
+	w := newDBWriter(db, batchCount)
+	for i := 0; i < n; i++ {
+		w.Put(g.Key(i), g.Value(i))
+	}
+	w.Done()
 }
 
 func doDelete(b *testing.B, db driver.DB, k int, g keyGenerator) {
-	batch := db.Batch()
-	for i := 0; i < b.N; i += k {
-		for j := 0; j < k; j++ {
-			batch.Delete(g.Key(i + j))
-		}
-		err := db.Write(batch, &writeOptions)
-		if err != nil {
-			b.Fatalf("db write error: %s\n", err)
-		}
-		batch.Clear()
+	w := newDBWriter(db, k)
+	for i := 0; i < b.N; i++ {
+		w.Delete(g.Key(i))
 	}
+	w.Done()
 }
 
-func createDB(b *testing.B) (driver.DB, string) {
+func createDB(n int) (driver.DB, string) {
 	dir, err := ioutil.TempDir("", "leveldb-benchmark-")
 	if err != nil {
-		b.Fatalf("temp dir create error: %s", err)
+		panic(fmt.Errorf("temp dir create error: %s", err))
 	}
 	ok := false
 	defer func() {
@@ -260,14 +416,14 @@ func createDB(b *testing.B) (driver.DB, string) {
 	}()
 	db, err := driver.Open(*driverName, dir, &createOptions)
 	if err != nil {
-		b.Fatalf("create db %q error: %s\n", dir, err)
+		panic(fmt.Errorf("create db %q error: %s\n", dir, err))
 	}
 	ok = true
 	return db, dir
 }
 
-func newDB(b *testing.B) string {
-	db, dir := createDB(b)
+func newDB(n int) string {
+	db, dir := createDB(n)
 	defer runtime.GC()
 	defer func() {
 		if db != nil {
@@ -275,7 +431,7 @@ func newDB(b *testing.B) string {
 			os.RemoveAll(dir)
 		}
 	}()
-	doWrite(b, db, 1000, newFullRandomEntryGenerator(0, b.N))
+	doWrite(db, n, 1000, newFullRandomEntryGenerator(0, n))
 	db.Close()
 	db = nil
 	return dir
@@ -290,9 +446,7 @@ func openDB(dir string, b *testing.B) driver.DB {
 }
 
 func openFullDB(b *testing.B) (driver.DB, func()) {
-	defer runtime.GC()
-	defer b.ResetTimer()
-	dir := newDB(b)
+	dir := newDB(b.N)
 	ok := false
 	defer func() {
 		if !ok {
@@ -306,22 +460,27 @@ func openFullDB(b *testing.B) (driver.DB, func()) {
 
 func openEmptyDB(b *testing.B) (driver.DB, func()) {
 	defer b.ResetTimer()
-	db, dir := createDB(b)
+	db, dir := createDB(b.N)
 	return db, func() { db.Close(); os.RemoveAll(dir) }
 }
 
-func BenchmarkOpen(b *testing.B) {
-	defer func(N int) {
-		b.N = N
-	}(b.N)
-	n := b.N
-	b.N = *openDBSize / *valueSize
-	dir := newDB(b)
-	b.N = n
-	defer os.RemoveAll(dir)
+func resetBenchmark(b *testing.B) {
+	runtime.GC()
 	b.ResetTimer()
+}
+
+func openTemplateDB() driver.DB {
+	db, err := driver.Open(*driverName, templateDBDir, &openOptions)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func BenchmarkOpen(b *testing.B) {
+	resetBenchmark(b)
 	for i := 0; i < b.N; i++ {
-		openDB(dir, b).Close()
+		openTemplateDB().Close()
 	}
 }
 
@@ -331,10 +490,16 @@ func BenchmarkSeekRandom(b *testing.B) {
 	g := newRandomKeyGenerator(b.N)
 	it := db.All(nil)
 	defer it.Close()
+	resetBenchmark(b)
 	for i := 0; i < b.N; i++ {
-		if !it.Seek(g.Key(i)) {
-			b.Fatalf("db seek not found: %s\n", it.Err())
+		key := g.Key(i)
+		if !it.Seek(key) {
+			b.Fatalf("db seek key [%s] not found, error %s\n", key, it.Err())
 		}
+		if !bytes.Equal(key, it.Key()) {
+			b.Fatalf("db seek key [%s] not found, got %s\n", key, it.Key())
+		}
+		it.Value()
 	}
 }
 
@@ -342,7 +507,8 @@ func BenchmarkReadHot(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
 	k := maxInt((b.N+99)/100, 1)
-	g := newRandomKeyGenerator(k)
+	g := newRoundKeyGenerator(newRandomKeyGenerator(k))
+	resetBenchmark(b)
 	doRead(b, db, g, false)
 }
 
@@ -350,58 +516,78 @@ func BenchmarkReadRandom(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
 	g := newRandomKeyGenerator(b.N)
+	resetBenchmark(b)
 	doRead(b, db, g, false)
 }
 
-func BenchmarkReadMissing(b *testing.B) {
+func BenchmarkReadRandomMissing(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
-	g := newMissingKeyGenerator(b.N)
+	g := newRandomMissingKeyGenerator(b.N)
+	resetBenchmark(b)
 	doRead(b, db, g, true)
-}
-
-func BenchmarkReadReverse(b *testing.B) {
-	db, cleanup := openFullDB(b)
-	defer cleanup()
-	it := db.All(nil)
-	defer it.Close()
-	for it.Prev() {
-		it.Key()
-		it.Value()
-	}
-	if err := it.Err(); err != nil {
-		b.Fatalf("db iterator error: %s\n", err)
-	}
 }
 
 func BenchmarkReadSequential(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
+	g := newSequentialKeyGenerator(b.N)
+	resetBenchmark(b)
+	doRead(b, db, g, false)
+}
+
+func BenchmarkReadReverse(b *testing.B) {
+	db, cleanup := openFullDB(b)
+	defer cleanup()
+	g := newReversedKeyGenerator(newSequentialKeyGenerator(b.N))
+	resetBenchmark(b)
+	doRead(b, db, g, false)
+}
+
+func BenchmarkIterateSequential(b *testing.B) {
+	db := openTemplateDB()
+	defer db.Close()
 	it := db.All(nil)
 	defer it.Close()
-	for it.Next() {
-		it.Key()
-		it.Value()
-	}
-	if err := it.Err(); err != nil {
-		b.Fatalf("db iterator error: %s\n", err)
+	resetBenchmark(b)
+	it.First()
+	for i := 0; i < b.N; i++ {
+		switch it.Valid() {
+		case false:
+			it.First()
+		default:
+			it.Key()
+			it.Value()
+			it.Next()
+		}
 	}
 }
 
-func BenchmarkWriteRandom(b *testing.B) {
-	db, cleanup := openEmptyDB(b)
-	defer cleanup()
-	g := newFullRandomEntryGenerator(0, b.N)
-	b.ResetTimer()
-	doWrite(b, db, maxInt(*batchCount, 1), g)
+func BenchmarkIterateReverse(b *testing.B) {
+	db := openTemplateDB()
+	defer db.Close()
+	it := db.All(nil)
+	defer it.Close()
+	resetBenchmark(b)
+	it.Last()
+	for i := 0; i < b.N; i++ {
+		switch it.Valid() {
+		case false:
+			it.Last()
+		default:
+			it.Key()
+			it.Value()
+			it.Prev()
+		}
+	}
 }
 
 func BenchmarkWriteSequential(b *testing.B) {
 	db, cleanup := openEmptyDB(b)
 	defer cleanup()
 	g := newSequentialEntryGenerator(b.N)
-	b.ResetTimer()
-	doWrite(b, db, maxInt(*batchCount, 1), g)
+	resetBenchmark(b)
+	doWrite(db, b.N, *batchCount, g)
 }
 
 func buildConcurrentWrite(parallelism int) func(*testing.B) {
@@ -409,29 +595,32 @@ func buildConcurrentWrite(parallelism int) func(*testing.B) {
 		db, cleanup := openEmptyDB(b)
 		defer cleanup()
 		var gens []entryGenerator
+		start, step := 0, (b.N+parallelism)/parallelism
+		n := step * parallelism
+		g := newFullRandomEntryGenerator(0, n)
 		for i := 0; i < parallelism; i++ {
-			gens = append(gens, newRandomEntryGenerator(b.N))
+			gens = append(gens, newStartAtEntryGenerator(start, g))
+			start += step
 		}
-		runtime.GC()
-		b.ResetTimer()
 		defer func(n int) {
 			b.N = n
 		}(b.N)
-		b.N = (b.N + parallelism) / parallelism
+		b.N = step
+		resetBenchmark(b)
 		var wg sync.WaitGroup
 		wg.Add(len(gens))
 		for _, g := range gens {
 			go func(g entryGenerator) {
 				defer wg.Done()
-				doWrite(b, db, maxInt(*batchCount, 1), g)
+				doWrite(db, b.N, *batchCount, g)
 			}(g)
 		}
 		wg.Wait()
 	}
 }
 
-func BenchmarkConcurrentWriteRandom(b *testing.B) {
-	for i, n := 2, *maxConcurrency; i <= n; i *= 2 {
+func BenchmarkWriteRandom(b *testing.B) {
+	for i, n := 1, *maxConcurrency; i <= n; i *= 2 {
 		name := fmt.Sprintf("parallelism-%d", i)
 		runtime.GC()
 		b.Run(name, buildConcurrentWrite(i))
@@ -441,17 +630,23 @@ func BenchmarkConcurrentWriteRandom(b *testing.B) {
 func BenchmarkDeleteRandom(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
-	doDelete(b, db, maxInt(*batchCount, 1), newRandomKeyGenerator(b.N))
+	g := newRandomKeyGenerator(b.N)
+	resetBenchmark(b)
+	doDelete(b, db, maxInt(*batchCount, 1), g)
 }
 
 func BenchmarkDeleteSequential(b *testing.B) {
 	db, cleanup := openFullDB(b)
 	defer cleanup()
-	doDelete(b, db, maxInt(*batchCount, 1), newSequentialKeyGenerator(b.N))
+	g := newSortedRandomKeyGenerator(b.N)
+	resetBenchmark(b)
+	doDelete(b, db, maxInt(*batchCount, 1), g)
 }
 
 func TestMain(m *testing.M) {
 	flag.Parse()
 	initOptions()
+	templateDBDir = newDB(*openDBSize / *valueSize)
+	defer os.RemoveAll(templateDBDir)
 	os.Exit(m.Run())
 }
